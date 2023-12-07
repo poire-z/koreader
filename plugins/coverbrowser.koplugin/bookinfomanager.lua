@@ -985,6 +985,99 @@ Do you want to prune the cache of removed books?]]
     UIManager:show(info)
 end
 
+function BookInfoManager:getMatchingMetadataValues(base_dir, meta_name, filters)
+    local vars = {}
+    local sql = T("select %1, count(1) from bookinfo where directory glob ?", meta_name)
+        -- GLOB is case sensitive, unlike LIKE. Also, LIKE is case insentive only
+        -- with ASCII chars, and not Unicode ones, so it's a bit useless.
+    table.insert(vars, base_dir..'*')
+    for _, filter in ipairs(filters) do
+        local name, value = filter[1], filter[2]
+        local name, value = filter[1], filter[2]
+        if value == false then
+            sql = T("%1 and %2 is NULL", sql, name)
+        elseif name == "authors" or name == "keywords" then
+            -- authors and keywords may have multiple values, separated by \n
+            sql = T("%1 and '\n'||%2||'\n' GLOB ?", sql, name)
+            table.insert(vars, "*\n"..value.."\n*")
+        else
+            sql = T("%1 and %2=?", sql, name)
+            table.insert(vars, value)
+        end
+    end
+    sql = T("%1 group by %2", sql, meta_name)
+        -- We might want to "group by" in a somehow case insentive manner,
+        -- but we would need to pick one of the variously cased values to
+        -- be returned and display, but which?
+        -- (mey be using group_concat(meta_name), and picking the one
+        -- with the most occurences, or the first)
+    -- logger.warn(sql, vars)
+    self:openDbConnection()
+    local stmt = self.db_conn:prepare(sql)
+    stmt:bind(table.unpack(vars))
+    local results = {}
+    local xresults = {}
+    local use_results_as_is = meta_name ~= "authors" and meta_name ~= "keywords"
+    while true do
+        local row = stmt:step()
+        if not row then
+            break
+        end
+        if use_results_as_is then
+            table.insert(results, {row[1] or false, tonumber(row[2])})
+        else
+            -- authors and keywords may have multiple values, separated by \n
+            local value, nb = row[1] or false, tonumber(row[2])
+            if value and value:find("\n") then
+                for val in util.gsplit(value, "\n") do
+                    xresults[val] = xresults[val] and (xresults[val] + nb) or nb
+                end
+            else
+                xresults[value] = xresults[value] and (xresults[value] + nb) or nb
+            end
+        end
+    end
+    if not use_results_as_is then
+        for value, nb in pairs(xresults) do
+            table.insert(results, {value, nb})
+        end
+    end
+    return results
+end
+
+function BookInfoManager:getMatchingFiles(base_dir, filters)
+    local vars = {}
+    local sql = "select directory||filename, filename from bookinfo where directory glob ?"
+    table.insert(vars, base_dir..'*')
+    for _, filter in ipairs(filters) do
+        local name, value = filter[1], filter[2]
+        if value == false then
+            sql = T("%1 and %2 is NULL", sql, name)
+        elseif name == "authors" or name == "keywords" then
+            -- authors and keywords may have multiple values, separated by \n
+            sql = T("%1 and '\n'||%2||'\n' GLOB ?", sql, name)
+            table.insert(vars, "*\n"..value.."\n*")
+        else
+            sql = T("%1 and %2=?", sql, name)
+            table.insert(vars, value)
+        end
+    end
+    -- logger.warn(sql, vars)
+    self:openDbConnection()
+    local stmt = self.db_conn:prepare(sql)
+    stmt:bind(table.unpack(vars))
+    local results = {}
+    while true do
+        local row = stmt:step()
+        if not row then
+            break
+        end
+        table.insert(results, {row[1], row[2]})
+    end
+    -- logger.warn(results)
+    return results
+end
+
 BookInfoManager:init()
 
 return BookInfoManager

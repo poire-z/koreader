@@ -222,7 +222,7 @@ function ListMenuItem:update()
     end
 
     local file_mode = lfs.attributes(self.filepath, "mode")
-    if file_mode == "directory" then
+    if file_mode == "directory" or self.entry.is_virtual_dir then
         self.is_directory = true
         -- nb items on the right, directory name on the left
         local wright = TextWidget:new{

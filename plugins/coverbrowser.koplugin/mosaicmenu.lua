@@ -460,7 +460,7 @@ function MosaicMenuItem:update()
     end
 
     local file_mode = lfs.attributes(self.filepath, "mode")
-    if file_mode == "directory" then
+    if file_mode == "directory" or self.entry.is_virtual_dir then
         self.is_directory = true
         -- Directory : rounded corners
         local margin = Screen:scaleBySize(5) -- make directories less wide

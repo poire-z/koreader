@@ -352,12 +352,213 @@ function FileChooser:getSortingFunction(collate, reverse_collate)
     return sorting
 end
 
+-- "\u{EA30} browse by metadata \u{EA30} \u{E7F5} \u{E7FC} \u{e8d5} \u{eec3} \u{e93a} \u{e92f} \u{e9c4} \u{ed49} \u{ea27} \u{edf8} \u{ebfa} \u{ebf8} \u{ebfc} \u{ec66} \u{ec68} \u{ec6d} \u{ec9e}"
+local VIRTUAL_ITEMS = {
+    ROOT = {
+        browse_text = _("Browse by metadata"),
+        filter_text = _("Filter by metadata"),
+        symbol = "\u{e257}",
+        -- symbol = "\u{ee30}",
+        -- symbol = "\u{ee26}",
+    },
+    TITLE = {
+        browse_text = _("Browse by title"),
+        filter_text = _("Filter by title"),
+        db_column = "title",
+        symbol = "\u{f02d}",
+        -- symbol = "\u{edf8}",
+        -- symbol = "\u{e28B}",
+        -- symbol = "\u{e7bc}",
+        -- symbol = "\u{e8fc}",
+        -- symbol = "\u{ea31}",
+    },
+    AUTHOR = {
+        browse_text = _("Browse by author"),
+        filter_text = _("Filter by author"),
+        db_column = "authors",
+        symbol = "\u{f2c0}",
+        -- symbol = "\u{ed49}",
+        -- symbol = "\u{f1ae}",
+        -- symbol = "\u{f007}",
+        -- symbol = "\u{e84e}",
+    },
+    SERIE = {
+        browse_text = _("Browse by serie"),
+        filter_text = _("Filter by serie"),
+        db_column = "series",
+        symbol = "\u{ecd7}",
+        -- symbol = "\u{ec68}",
+        -- symbol = "\u{ec75}",
+        -- symbol = "\u{ed37}",
+        -- symbol = "\u{f03d}",
+        -- symbol = "\u{f447}",
+    },
+    LANGUAGE = {
+        browse_text = _("Browse by language"),
+        filter_text = _("Filter by language"),
+        db_column = "language",
+        symbol = "\u{f0e5}",
+        -- symbol = "\u{ec9e}",
+    },
+    KEYWORD = {
+        browse_text = _("Browse by keyword"),
+        filter_text = _("Filter by keyword"),
+        db_column = "keywords",
+        symbol = "\u{f412}",
+        -- symbol = "\u{e8d5}",
+    },
+    -- YEAR "\u{f073}", but not available in bookinfo or cre
+}
+
+local VIRTUAL_SUBITEMS_ORDERED = {
+    VIRTUAL_ITEMS.TITLE,
+    VIRTUAL_ITEMS.AUTHOR,
+    VIRTUAL_ITEMS.SERIE,
+    VIRTUAL_ITEMS.LANGUAGE,
+    VIRTUAL_ITEMS.KEYWORD,
+}
+local VIRTUAL_ROOT_SYMBOL = VIRTUAL_ITEMS.ROOT.symbol
+local VIRTUAL_SYMBOLS = {}
+for k, v in pairs(VIRTUAL_ITEMS) do
+    VIRTUAL_SYMBOLS[v.symbol] = v
+end
+
+local VIRTUAL_PATH_TYPE_ROOT = "VIRTUAL_PATH_TYPE_ROOT"
+local VIRTUAL_PATH_TYPE_META_VALUES_LIST = "VIRTUAL_PATH_TYPE_META_VALUES_LIST"
+local VIRTUAL_PATH_TYPE_MATCHING_FILES = "VIRTUAL_PATH_TYPE_MATCHING_FILES"
+
+function FileChooser:getVirtualPathTypePath(path)
+    if not path then return end
+    if path:find("/"..VIRTUAL_ROOT_SYMBOL.."$") then
+        return VIRTUAL_PATH_TYPE_ROOT
+    end
+    if path:find("/"..VIRTUAL_ROOT_SYMBOL.."/") then
+        local _, last_part = util.splitFilePathName(path)
+        local symbol = VIRTUAL_SYMBOLS[last_part]
+        if symbol then
+            if symbol == VIRTUAL_ITEMS.ROOT then
+                return VIRTUAL_PATH_TYPE_ROOT
+            elseif symbol ~= VIRTUAL_ITEMS.TITLE then
+                return VIRTUAL_PATH_TYPE_META_VALUES_LIST
+            end
+        end
+        return VIRTUAL_PATH_TYPE_MATCHING_FILES
+    end
+end
+
+function FileChooser:getVirtualList(path, collate)
+    local dirs, files = {}, {}
+    local base_dir, virtual_root, virtual_path = path:match("(.-)/("..VIRTUAL_ROOT_SYMBOL..")(.*)")
+    if not virtual_root then
+        return dirs, files
+    end
+    local fragments = {}
+    for fragment in util.gsplit(virtual_path, "/") do
+        -- XXX issue if / in metadata content (Frank Thilliez keywords
+        table.insert(fragments, fragment)
+    end
+    if #fragments == 0 or fragments[#fragments] == VIRTUAL_ROOT_SYMBOL then
+        local filtering = #fragments > 0
+        if filtering then
+            -- Showing a 2nd ROOT symbol: make a tap on the subitems just replace it
+            path = path:match("(.*)/.*")
+        end
+        for i, v in ipairs(VIRTUAL_SUBITEMS_ORDERED) do
+            item = true
+            if collate then -- when collate == nil count only to display in folder mandatory
+                local fake_attributes = {
+                    mode = "directory",
+                    modification = 0,
+                    access = 0,
+                    change = 0,
+                    size = i,
+                }
+                item = self:getListItem(nil, v.symbol.." "..(filtering and v.filter_text or v.browse_text), path.."/"..v.symbol, fake_attributes, collate)
+                item.is_virtual_dir = true
+                item.mandatory = nil
+            end
+            table.insert(dirs, item)
+        end
+        return dirs, files
+    end
+    -- We have arguments
+    local meta_name
+    local filters = {}
+    local filters_seen = {}
+    local cur_value
+    while #fragments > 0 do
+        local fragment = table.remove(fragments)
+        local meta = VIRTUAL_SYMBOLS[fragment]
+        if meta then
+            if meta == VIRTUAL_ITEMS.ROOT or meta == VIRTUAL_ITEMS.TITLE then
+                do end -- do nothing
+            else
+                local db_meta_name = meta.db_column
+                if cur_value ~= nil then
+                    table.insert(filters, {db_meta_name, cur_value})
+                    if not filters_seen[db_meta_name] then
+                        filters_seen[db_meta_name] = {}
+                    end
+                    filters_seen[db_meta_name][cur_value] = true
+                else
+                    meta_name = db_meta_name
+                end
+            end
+        else
+            cur_value = fragment
+            if cur_value == "\u{2205}" then
+                cur_value = false -- NULL
+            end
+        end
+    end
+    if meta_name == "title" then
+        meta_name = nil
+    end
+    if meta_name then
+        local matching_values = self.filemanager.coverbrowser:getMatchingMetadataValues(base_dir, meta_name, filters)
+        for i, v in ipairs(matching_values) do
+            -- Ignore those already present in the current filters
+            if not filters_seen[meta_name] or not filters_seen[meta_name][v[1]] then
+                local fake_attributes = {
+                    mode = "directory",
+                    modification = 0,
+                    access = 0,
+                    change = 0,
+                    size = i,
+                }
+                local name = v[1] or "\u{2205}"
+                local this_path = path.."/"..(v[1] or "\u{2205}")
+                item = self:getListItem(nil, name, this_path, fake_attributes, collate)
+                item.nb_sub_files = v[2]
+                item.is_virtual_dir = true
+                item.mandatory = self:getMenuItemMandatory(item)
+                table.insert(dirs, item)
+            end
+        end
+    else
+        local matching_files = self.filemanager.coverbrowser:getMatchingFiles(base_dir, filters)
+        for i, v in ipairs(matching_files) do
+            local filepath = v[1]
+            local attributes = lfs.attributes(filepath)
+            if attributes and attributes.mode == "file" then
+                local item = self:getListItem(path, v[2], filepath, attributes, collate)
+                table.insert(files, item)
+            end
+        end
+    end
+    return dirs, files
+end
+
 function FileChooser:clearSortingCache()
     self.sort_cache = nil
 end
 
 function FileChooser:genItemTableFromPath(path)
     local collate = self:getCollate()
+    if self:getVirtualPathTypePath(path) then
+        local dirs, files = self:getVirtualList(path, collate)
+        return self:genItemTable(dirs, files, path)
+    end
     local dirs, files = self:getList(path, collate)
     return self:genItemTable(dirs, files, path)
 end
@@ -367,6 +568,13 @@ function FileChooser:genItemTable(dirs, files, path)
     local collate_mixed = G_reader_settings:isTrue("collate_mixed")
     local reverse_collate = G_reader_settings:isTrue("reverse_collate")
     local sorting = self:getSortingFunction(collate, reverse_collate)
+
+    local virtual_path_type = self:getVirtualPathTypePath(path)
+    if virtual_path_type == VIRTUAL_PATH_TYPE_ROOT then
+        -- Listing "browse by title"...
+        collate = self.collates["size"]
+        collate_mixed = false
+    end
 
     local item_table = {}
     if collate.can_collate_mixed and collate_mixed then
@@ -383,13 +591,26 @@ function FileChooser:genItemTable(dirs, files, path)
         table.move(files, 1, #files, #item_table + 1, item_table)
     end
 
+    -- Plugins may not yet be loaded, so we can't use self.filemanager.coverbrowser to check if CoverBrowser will be available
+    local coverbrowser_available = not G_reader_settings:readSetting("plugins_disabled") or not G_reader_settings:readSetting("plugins_disabled")["coverbrowser"]
+    if self.filemanager and coverbrowser_available and path and (virtual_path_type == nil or virtual_path_type == VIRTUAL_PATH_TYPE_MATCHING_FILES) then
+        table.insert(item_table, 1, {
+            --text = "\u{EA30} browse by metadata \u{EA30} \u{E7F5} \u{E7FC} \u{e8d5} \u{eec3} \u{e93a} \u{e92f} \u{e9c4} \u{ed49} \u{ea27} \u{edf8} \u{ebfa} \u{ebf8} \u{ebfc} \u{ec66} \u{ec68} \u{ec6d} \u{ec9e}",
+            text = VIRTUAL_ROOT_SYMBOL .. " " .. (virtual_path_type and VIRTUAL_ITEMS.ROOT.filter_text or VIRTUAL_ITEMS.ROOT.browse_text),
+            path = path.."/"..VIRTUAL_ROOT_SYMBOL,
+            is_virtual_dir = true,
+            is_virtual_root_dir = true,
+        })
+    end
+
     if path then -- file browser or PathChooser
         if path ~= "/" and not (G_reader_settings:isTrue("lock_home_folder") and
                                 path == G_reader_settings:readSetting("home_dir")) then
             table.insert(item_table, 1, {
                 text = BD.mirroredUILayout() and BD.ltr("../ ⬆") or "⬆ ../",
-                path = path.."/..",
+                path = virtual_path_type ~= nil and path:gsub("(/[^/]+$", "") or path.."/..",
                 is_go_up = true,
+                is_virtual_dir = virtual_path_type ~= nil,
             })
         end
         if self.show_current_dir_for_hold then
@@ -422,10 +643,18 @@ function FileChooser:getMenuItemMandatory(item, collate)
             text = util.getFriendlySize(item.attr.size or 0)
         end
     else -- folder, count number of folders and files inside it
-        local sub_dirs, dir_files = self:getList(item.path)
-        text = T("%1 \u{F016}", #dir_files)
-        if #sub_dirs > 0 then
-            text = T("%1 \u{F114} ", #sub_dirs) .. text
+        local nb_sub_dirs, nb_sub_files
+        if item.nb_sub_dirs or item.nb_sub_files then
+            nb_sub_dirs = item.nb_sub_dirs or 0
+            nb_sub_files = item.nb_sub_files or 0
+        else
+            local sub_dirs, dir_files = self:getList(item.path)
+            nb_sub_dirs = #sub_dirs
+            nb_sub_files = #dir_files
+        end
+        text = T("%1 \u{F016}", nb_sub_files)
+        if nb_sub_dirs > 0 then
+            text = T("%1 \u{F114} ", nb_sub_dirs) .. text
         end
         if FileManagerShortcuts:hasFolderShortcut(item.path) then
             text = "☆ " .. text
@@ -458,7 +687,13 @@ function FileChooser:refreshPath()
 end
 
 function FileChooser:changeToPath(path, focused_path)
-    path = ffiUtil.realpath(path)
+    if self:getVirtualPathTypePath(path) then
+        if util.stringEndsWith(path, "/..") then -- process "go up"
+            path = path:gsub("(/[^/]+/%.%.$", "")
+        end
+    else
+        path = ffiUtil.realpath(path)
+    end
     self.path = path
 
     if focused_path then
