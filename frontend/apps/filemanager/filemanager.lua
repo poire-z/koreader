@@ -200,6 +200,8 @@ function FileManager:setupLayout()
         local is_file = item.is_file
         local is_not_parent_folder = not item.is_go_up
 
+        if not is_file and not is_folder then return true end -- virtual directory
+
         local function close_dialog_callback()
             UIManager:close(self.file_dialog)
         end

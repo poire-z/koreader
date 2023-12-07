@@ -249,6 +249,7 @@ function CoverMenu:updateItems(select_number)
                 -- Call original function: it will create a ButtonDialog
                 -- and store it as self.file_dialog, and UIManager:show() it.
                 self.showFileDialog_orig(self, item)
+                if not self.file_dialog then return true end -- virtual directory
 
                 local bookinfo = self.book_props -- getBookInfo(file) called by FileManager
                 if not bookinfo or bookinfo._is_directory then

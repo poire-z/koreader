@@ -820,4 +820,12 @@ function CoverBrowser:extractBooksInDirectory(path)
     end)
 end
 
+function CoverBrowser:getMatchingMetadataValues(base_dir, meta_name, filters)
+    return BookInfoManager:getMatchingMetadataValues(base_dir, meta_name, filters)
+end
+
+function CoverBrowser:getMatchingFiles(base_dir, filters)
+    return BookInfoManager:getMatchingFiles(base_dir, filters)
+end
+
 return CoverBrowser

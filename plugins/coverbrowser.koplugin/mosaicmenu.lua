@@ -461,7 +461,7 @@ function MosaicMenuItem:update()
         self.menu.cover_specs = false
     end
 
-    self.is_directory = not (self.entry.is_file or self.entry.file)
+    self.is_directory = not (self.entry.is_file or self.entry.file) or self.entry.is_virtual_dir
     if self.is_directory then
         -- Directory : rounded corners
         local margin = Screen:scaleBySize(5) -- make directories less wide
